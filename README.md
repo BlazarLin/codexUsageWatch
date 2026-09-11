@@ -52,6 +52,7 @@
 | 文件 | 说明 |
 |---|---|
 | `CodexUsageWatch-Setup-vX.Y.Z.exe` | 安装包：向导式安装到本机（用户级，免管理员），可选桌面快捷方式与开机自启，自带卸载器 |
+| `CodexUsageWatch-portable-win64.zip` | 便携版：解压即用，免安装 |
 
 > 首次运行若遇 SmartScreen 提示，点击「更多信息 → 仍要运行」即可（未签名的开源应用常见提示）。
 
@@ -125,6 +126,10 @@ codexUsageWatch/
 **安装包被 SmartScreen 拦截？**
 安装包未做代码签名，首次运行会触发 Windows SmartScreen 提示，
 点击「更多信息 → 仍要运行」即可。
+
+**任务管理器里图标是 Python 图标？**
+仅在使用源码运行（`pythonw main.py`）时出现：进程图标取自 Python 解释器自身，
+应用无法修改。使用安装版或独立 exe 时显示应用图标。
 
 **每次查询耗时多久？**
 实测约 3~5 秒（含子进程启动与 API 往返），全程在工作线程执行，UI 无感。

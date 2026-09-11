@@ -97,7 +97,7 @@ def fmt_remain_rel(delta_sec):
     days, rem = divmod(total_min, 1440)
     hours, minutes = divmod(rem, 60)
     if days > 0:
-        return "%d天" % days if hours == 0 else "%d天%d时" % (days, hours)
+        return "%d天%d时" % (days, hours)
     if hours > 0:
         return "%d时%02d分" % (hours, minutes)
     return "%d分" % minutes
@@ -122,7 +122,7 @@ class RingGauge(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(186, 120)
+        self.setFixedSize(186, 114)
         self.m_display = None   # 当前显示值(动画中)
         self.m_target = None    # 动画目标值
         self.m_b_spin = False   # 查询中旋转标记
@@ -171,10 +171,11 @@ class RingGauge(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # 环体几何(占满控件宽, 压缩卡片留白)
-        side = 106.0
+        # 环体几何: 描边以路径为中心向两侧各延伸 pen_w/2,
+        # 需保证 rect±6(描边)完全落在控件内, 否则圆环被裁
+        side = 98.0
         pen_w = 12.0
-        rect = QRectF((self.width() - side) / 2.0, 3.0, side, side)
+        rect = QRectF((self.width() - side) / 2.0, 7.0, side, side)
         center_y = rect.center().y()
 
         # 背景轨道

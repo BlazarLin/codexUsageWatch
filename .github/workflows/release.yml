@@ -103,6 +103,7 @@ jobs:
             exit 1
           }
           Write-Host "makensis: $mk"
+          New-Item -ItemType Directory -Force -Path installer | Out-Null  # NSIS 不自动创建 OutFile 目录
           & $mk /DAPP_VERSION=$env:APP_VERSION installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer

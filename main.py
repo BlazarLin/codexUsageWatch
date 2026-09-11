@@ -45,6 +45,9 @@ AUTO_REFRESH_MS = 30 * 60 * 1000  # 自动查询周期: 30min
 CLOCK_TICK_MS = 60 * 1000         # 倒计时文本重算周期: 1min
 ROLL_MS = 500                     # 百分比数字滚动动画时长
 
+DEFAULT_W = 204                   # 默认宽度(最小宽度)
+MAX_W, MAX_H = 480, 480           # 缩放上限
+
 # 剩余比例配色阈值(与 CodexQuotaMonitor 习惯一致)
 AMBER_AT = 30   # 剩余 <30% 转琥珀
 RED_AT = 15     # 剩余 <15% 转红
@@ -217,6 +220,29 @@ class RingGauge(QWidget):
         p.drawText(QRectF(0, center_y + 4, self.width(), 16), Qt.AlignCenter, "剩余")
 
 
+class ResizeGrip(QWidget):
+    """右下角透明缩放手柄: 按住拖拽缩放窗口, 悬停显示对角缩放光标"""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(18, 18)
+        self.setCursor(Qt.SizeFDiagCursor)
+        self.setToolTip("拖拽缩放")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.parent().begin_resize(event.globalPos())
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        # 按下期间 Qt 隐式抓取鼠标, 移动/释放持续派发到手柄
+        self.parent().update_resize(event.globalPos())
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.parent().end_resize()
+
+
 class QuotaCard(QWidget):
     """悬浮配额仪表卡片主窗口"""
 
@@ -230,6 +256,9 @@ class QuotaCard(QWidget):
         self.m_last_plan = ""      # 计划类型
         self.m_b_topmost = True    # 置顶状态
         self.m_drag_pos = QPoint()
+        self.m_b_resizing = False  # 缩放进行中标记
+        self.m_rstart_g = QPoint() # 缩放起点(全局坐标)
+        self.m_rstart_size = None  # 缩放起点尺寸
 
         self._init_window()
         self._init_ui()
@@ -240,12 +269,12 @@ class QuotaCard(QWidget):
     # ---------- 初始化 ----------
 
     def _init_window(self):
-        self.setWindowTitle("Codex 用量")
+        self.setWindowTitle("Codex Usage Watch")
+        # Qt.Window: 任务栏/Alt-Tab 显示应用图标(此前 Qt.Tool 隐藏任务栏)
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedWidth(204)
 
     def _init_ui(self):
         root = QVBoxLayout(self)
@@ -275,6 +304,9 @@ class QuotaCard(QWidget):
             "color:%s; font:8.5pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
         root.addWidget(self.lb_reset)
 
+        # 弹性空间置于倒计时与底部之间: 缩放放大时底栏贴底、内容贴顶
+        root.addStretch(1)
+
         # 底部行: 极简状态 + 刷新按钮
         foot_row = QHBoxLayout()
         self.lb_status = QLabel("…")
@@ -295,8 +327,12 @@ class QuotaCard(QWidget):
         foot_row.addWidget(self.btn_refresh)
         root.addLayout(foot_row)
 
-        # 按内容固定窗口高度(宽度已在 _init_window 固定)
-        self.setFixedHeight(self.sizeHint().height())
+        # 先创建右下角缩放手柄(下方 resize() 触发的 resizeEvent 会把它钉到右下角),
+        # 再设定默认尺寸 = 内容最小尺寸; 不固定死, 支持手柄缩放
+        self.grip = ResizeGrip(self)
+        self.setMinimumSize(DEFAULT_W, self.sizeHint().height())
+        self.resize(DEFAULT_W, self.sizeHint().height())
+        self.grip.raise_()
 
     def _init_worker(self):
         # worker-object 模式: Worker 移入 QThread, UI 通过信号触发查询
@@ -400,6 +436,37 @@ class QuotaCard(QWidget):
             % (health_color(max(0, 100 - primary.get("usedPercent", 0))), rel, COLOR_TEXT_DIM))
         self.lb_reset.setToolTip("%s 重置" % fmt_reset_abs(resets_at))
 
+    # ---------- 缩放(右下角手柄) ----------
+
+    def begin_resize(self, gpos):
+        self.m_b_resizing = True
+        self.m_rstart_g = gpos
+        self.m_rstart_size = self.size()
+        QApplication.setOverrideCursor(Qt.SizeFDiagCursor)
+
+    def update_resize(self, gpos):
+        if not self.m_b_resizing:
+            return
+        dw = gpos.x() - self.m_rstart_g.x()
+        dh = gpos.y() - self.m_rstart_g.y()
+        w = max(self.minimumWidth(), min(MAX_W, self.m_rstart_size.width() + dw))
+        h = max(self.minimumHeight(), min(MAX_H, self.m_rstart_size.height() + dh))
+        self.resize(w, h)
+
+    def end_resize(self):
+        if not self.m_b_resizing:
+            return
+        self.m_b_resizing = False
+        QApplication.restoreOverrideCursor()
+        self._save_config()  # 缩放结束即持久化尺寸
+
+    def resizeEvent(self, event):
+        # 手柄始终钉在右下角(构造早期 grip 尚未创建, 需防护)
+        grip = getattr(self, "grip", None)
+        if grip:
+            grip.move(self.width() - grip.width(), self.height() - grip.height())
+        super().resizeEvent(event)
+
     # ---------- 交互: 拖拽 / 右键菜单 ----------
 
     def mousePressEvent(self, event):
@@ -468,19 +535,31 @@ class QuotaCard(QWidget):
             self.m_b_topmost = not self.m_b_topmost
             self.setWindowFlag(Qt.WindowStaysOnTopHint, self.m_b_topmost)
             self.show()  # setWindowFlag 后需要重新 show
+            self._save_config()
         elif chosen == act_quit:
             self.close()
 
     # ---------- 位置持久化 ----------
 
     def _load_config(self):
-        pos = None
+        pos, size, topmost = None, None, True
         try:
             if os.path.exists(CONFIG_PATH):
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    pos = json.load(f).get("pos")
+                    cfg = json.load(f)
+                pos = cfg.get("pos")
+                size = cfg.get("size")
+                topmost = cfg.get("topmost", True)
         except (OSError, ValueError):
             pos = None
+        # 置顶标记(窗口 show 之前设置, 无需重刷)
+        self.m_b_topmost = bool(topmost)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, self.m_b_topmost)
+        # 尺寸(旧配置无 size 键则用默认)
+        if size and len(size) == 2:
+            w = max(self.minimumWidth(), min(MAX_W, int(size[0])))
+            h = max(self.minimumHeight(), min(MAX_H, int(size[1])))
+            self.resize(w, h)
         if pos:
             self.move(int(pos[0]), int(pos[1]))
         else:
@@ -492,7 +571,11 @@ class QuotaCard(QWidget):
     def _save_config(self):
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump({"pos": [self.x(), self.y()]}, f)
+                json.dump({
+                    "pos": [self.x(), self.y()],
+                    "size": [self.width(), self.height()],
+                    "topmost": self.m_b_topmost,
+                }, f)
         except OSError:
             pass  # 位置保存失败不影响功能
 

@@ -76,14 +76,24 @@ jobs:
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
-          # choco 装完的 shim 不会进入当前步骤的 PATH, 需显式回退到 shim 绝对路径
-          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
-          if (-not $makensis) {
+          # 定位 makensis: PATH -> 预装路径 -> choco shim -> choco lib 递归搜索
+          $mk = @(
+            (Get-Command makensis -ErrorAction SilentlyContinue).Source,
+            "C:\Program Files (x86)\NSIS\makensis.exe",
+            "C:\ProgramData\chocolatey\bin\makensis.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $mk) {
             choco install nsis -y --no-progress
-            $makensis = "C:\ProgramData\chocolatey\bin\makensis.exe"
+            $mk = Get-ChildItem "C:\ProgramData\chocolatey\lib\nsis" `
+              -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
           }
-          Write-Host "makensis: $makensis"
-          & $makensis /DAPP_VERSION=$env:APP_VERSION installer.nsi
+          if (-not $mk -or -not (Test-Path $mk)) {
+            Write-Error "makensis 未找到"
+            exit 1
+          }
+          Write-Host "makensis: $mk"
+          & $mk /DAPP_VERSION=$env:APP_VERSION installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer
 

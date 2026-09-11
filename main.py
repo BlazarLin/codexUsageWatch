@@ -97,7 +97,7 @@ def fmt_remain_rel(delta_sec):
     days, rem = divmod(total_min, 1440)
     hours, minutes = divmod(rem, 60)
     if days > 0:
-        return "%d天%d时" % (days, hours)
+        return "%d天" % days if hours == 0 else "%d天%d时" % (days, hours)
     if hours > 0:
         return "%d时%02d分" % (hours, minutes)
     return "%d分" % minutes
@@ -122,7 +122,7 @@ class RingGauge(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(148, 132)
+        self.setFixedSize(186, 120)
         self.m_display = None   # 当前显示值(动画中)
         self.m_target = None    # 动画目标值
         self.m_b_spin = False   # 查询中旋转标记
@@ -171,10 +171,10 @@ class RingGauge(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # 环体几何
-        side = 102.0
+        # 环体几何(占满控件宽, 压缩卡片留白)
+        side = 106.0
         pen_w = 12.0
-        rect = QRectF((self.width() - side) / 2.0, 6.0, side, side)
+        rect = QRectF((self.width() - side) / 2.0, 3.0, side, side)
         center_y = rect.center().y()
 
         # 背景轨道
@@ -205,7 +205,7 @@ class RingGauge(QWidget):
         # 中心文字: 彩色百分比 + 灰色"剩余"
         p.setPen(QColor(num_color))
         p.setOpacity(alpha / 255.0)
-        f_big = QFont("Microsoft YaHei UI", 21)
+        f_big = QFont("Microsoft YaHei UI", 20)
         f_big.setBold(True)
         p.setFont(f_big)
         text = "--%" if self.m_display is None else "%d%%" % round(self.m_display)
@@ -244,20 +244,20 @@ class QuotaCard(QWidget):
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedWidth(224)
+        self.setFixedWidth(204)
 
     def _init_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 11, 12, 11)
-        root.setSpacing(3)
+        root.setContentsMargins(9, 8, 9, 8)
+        root.setSpacing(2)
 
         # 标题行: 名称 + 健康状态点
         title_row = QHBoxLayout()
         self.lb_title = QLabel("Codex")
         self.lb_title.setStyleSheet(
-            "color:%s; font:600 10pt 'Microsoft YaHei UI';" % COLOR_TEXT)
+            "color:%s; font:600 9.5pt 'Microsoft YaHei UI';" % COLOR_TEXT)
         self.lb_dot = QLabel("●")
-        self.lb_dot.setStyleSheet("color:%s; font:12pt;" % COLOR_TEXT_DIM)
+        self.lb_dot.setStyleSheet("color:%s; font:10pt;" % COLOR_TEXT_DIM)
         title_row.addWidget(self.lb_title)
         title_row.addStretch()
         title_row.addWidget(self.lb_dot)
@@ -271,7 +271,7 @@ class QuotaCard(QWidget):
         self.lb_reset = QLabel("等待首次查询…")
         self.lb_reset.setAlignment(Qt.AlignCenter)
         self.lb_reset.setStyleSheet(
-            "color:%s; font:9pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
+            "color:%s; font:8.5pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
         root.addWidget(self.lb_reset)
 
         # 底部行: 极简状态 + 刷新按钮
@@ -280,12 +280,12 @@ class QuotaCard(QWidget):
         self.lb_status.setStyleSheet(
             "color:%s; font:8pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
         self.btn_refresh = QPushButton("↻")
-        self.btn_refresh.setFixedSize(26, 26)
+        self.btn_refresh.setFixedSize(24, 24)
         self.btn_refresh.setCursor(Qt.PointingHandCursor)
         self.btn_refresh.setToolTip("立即刷新(自动刷新周期 30 分钟)")
         self.btn_refresh.setStyleSheet(
             "QPushButton{color:%s; background:#2b2e36; border:none;"
-            "border-radius:13px; font:12pt;}"
+            "border-radius:12px; font:11pt;}"
             "QPushButton:hover{background:#3d414c; color:#ffffff;}"
             "QPushButton:disabled{color:#6b7078;}" % COLOR_TEXT)
         self.btn_refresh.clicked.connect(self._request_query)
@@ -355,7 +355,7 @@ class QuotaCard(QWidget):
 
         # 状态点: 触发限流→红, 否则按剩余健康度
         dot_color = COLOR_RED if main.get("rateLimitReachedType") else health_color(remain)
-        self.lb_dot.setStyleSheet("color:%s; font:12pt;" % dot_color)
+        self.lb_dot.setStyleSheet("color:%s; font:10pt;" % dot_color)
         self.lb_dot.setToolTip("状态: %s(剩余 %d%%)" % (
             "限流中" if main.get("rateLimitReachedType") else health_word(remain), remain))
 
@@ -509,7 +509,7 @@ class QuotaCard(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
 
         grad = QLinearGradient(0, 0, 0, self.height())
         grad.setColorAt(0.0, QColor(38, 41, 50, 240))

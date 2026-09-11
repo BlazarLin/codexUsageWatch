@@ -11,7 +11,7 @@
 倒计时提示下次重置时间，健康配色（绿 / 琥珀 / 红）一眼识别余量状态。
 
 <p align="center">
-  <img src="codex_quota_widget/screenshots/widget.png" width="280" alt="悬浮窗截图" />
+  <img src="screenshots/widget.png" width="280" alt="悬浮窗截图" />
 </p>
 
 ## ✨ 功能特性
@@ -57,7 +57,6 @@
 
 ```bash
 pip install PyQt5
-cd codex_quota_widget
 python main.py            # 或直接双击「启动悬浮窗.bat」(pythonw 无控制台)
 ```
 
@@ -78,14 +77,13 @@ python main.py            # 或直接双击「启动悬浮窗.bat」(pythonw 无
 
 ```
 codexUsageWatch/
-├── codex_usage.py               # CLI 查询脚本(同链路, 便于脚本化调用)
-└── codex_quota_widget/
-    ├── main.py                  # 悬浮窗 UI(圆环仪表/拖拽/右键菜单/定时器)
-    ├── quota_worker.py          # 后台查询 Worker(worker-object 模式)
-    ├── codex_rpc.py             # app-server JSON-RPC 查询封装
-    ├── _selftest.py             # offscreen 回归自测(不弹窗)
-    ├── 启动悬浮窗.bat            # 无控制台启动脚本
-    └── screenshots/             # 界面截图
+├── main.py              # 悬浮窗 UI(圆环仪表/拖拽/右键菜单/定时器)
+├── quota_worker.py      # 后台查询 Worker(worker-object 模式)
+├── codex_rpc.py         # app-server JSON-RPC 查询封装
+├── codex_usage.py       # CLI 查询脚本(同链路, 便于脚本化调用)
+├── _selftest.py         # offscreen 回归自测(不弹窗)
+├── 启动悬浮窗.bat        # 无控制台启动脚本
+└── screenshots/         # 界面截图
 ```
 
 ## ❓ 常见问题

@@ -76,15 +76,25 @@ jobs:
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
-          # 定位 makensis: PATH -> 预装路径 -> choco shim -> choco lib 递归搜索
-          $mk = @(
-            (Get-Command makensis -ErrorAction SilentlyContinue).Source,
-            "C:\Program Files (x86)\NSIS\makensis.exe",
-            "C:\ProgramData\chocolatey\bin\makensis.exe"
-          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          # 定位 makensis: PATH -> 常见安装位置 -> choco lib 递归搜索
+          function Find-Makensis {
+            $c = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($c) { return $c.Source }
+            foreach ($p in @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe"
+            )) { if (Test-Path $p) { return $p } }
+            return $null
+          }
+          $mk = Find-Makensis
           if (-not $mk) {
             choco install nsis -y --no-progress
-            $mk = Get-ChildItem "C:\ProgramData\chocolatey\lib\nsis" `
+            $mk = Find-Makensis
+          }
+          if (-not $mk) {
+            # 兜底: choco zip 便携包解压在 lib 下, 递归搜索
+            $mk = Get-ChildItem "C:\ProgramData\chocolatey\lib" `
               -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
               Select-Object -First 1 -ExpandProperty FullName
           }

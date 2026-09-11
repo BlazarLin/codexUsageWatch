@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行时状态(窗口位置等本地数据, 不入库)
+config.json
+
+# IDE / 系统
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+
+# 临时产物
+*.log
+*.tmp
+_*.png

@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 
 from PyQt5.QtCore import (
-    QEasingCurve, QPoint, QRectF, QVariantAnimation, Qt, QThread, QTimer, pyqtSignal,
+    QEasingCurve, QPoint, QRectF, QSize, QVariantAnimation, Qt, QThread, QTimer, pyqtSignal,
 )
 from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QIcon
 from PyQt5.QtWidgets import (
@@ -45,8 +45,8 @@ AUTO_REFRESH_MS = 30 * 60 * 1000  # 自动查询周期: 30min
 CLOCK_TICK_MS = 60 * 1000         # 倒计时文本重算周期: 1min
 ROLL_MS = 500                     # 百分比数字滚动动画时长
 
-DEFAULT_W = 204                   # 默认宽度(最小宽度)
-MAX_W, MAX_H = 480, 480           # 缩放上限
+DEFAULT_W = 204                   # 默认宽度(同时是最大宽度, 只允许缩小)
+MIN_W, MIN_H = 128, 128           # 缩放下限(迷你徽章尺寸)
 
 # 剩余比例配色阈值(与 CodexQuotaMonitor 习惯一致)
 AMBER_AT = 30   # 剩余 <30% 转琥珀
@@ -121,11 +121,10 @@ def short_model_name(name):
 
 
 class RingGauge(QWidget):
-    """圆环仪表: 轨道 + 光晕 + 剩余弧线 + 中心彩色数字; 查询中切换为旋转扫描弧"""
+    """圆环仪表: 环径/描边/字号随控件尺寸实时压缩, 查询中切换旋转扫描弧"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(186, 114)
         self.m_display = None   # 当前显示值(动画中)
         self.m_target = None    # 动画目标值
         self.m_b_spin = False   # 查询中旋转标记
@@ -141,6 +140,19 @@ class RingGauge(QWidget):
         self.m_spin_timer = QTimer(self)
         self.m_spin_timer.setInterval(33)
         self.m_spin_timer.timeout.connect(self._tick_spin)
+
+    def sizeHint(self):
+        # 默认基准尺寸: 布局据此分配初始高度
+        return QSize(186, 114)
+
+    def minimumSizeHint(self):
+        # 允许压缩到迷你徽章级别
+        return QSize(60, 44)
+
+    @staticmethod
+    def _side_for(w, h):
+        """环径: 可用空间扣除描边余量后按比例压缩(1.12 = 1 + 描边占比, 保证不裁边)"""
+        return max(36, int((min(w, h) - 4) / 1.12))
 
     def set_remain(self, target_pct):
         """目标剩余值变化时滚动过渡; 首次从 0 滚起, 强化'数据到来'的感知"""
@@ -174,12 +186,12 @@ class RingGauge(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # 环体几何: 描边以路径为中心向两侧各延伸 pen_w/2,
-        # 需保证 rect±6(描边)完全落在控件内, 否则圆环被裁
-        side = 98.0
-        pen_w = 12.0
-        rect = QRectF((self.width() - side) / 2.0, 7.0, side, side)
-        center_y = rect.center().y()
+        # 环体几何: 环径随控件实时压缩, 居中绘制; 描边/光晕/字号同步缩放
+        side = self._side_for(self.width(), self.height())
+        pen_w = max(6, round(side * 0.12))
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        rect = QRectF(cx - side / 2.0, cy - side / 2.0, side, side)
+        center_y = cy
 
         # 背景轨道
         p.setPen(QPen(QColor("#31343d"), pen_w, Qt.SolidLine, Qt.RoundCap))
@@ -198,7 +210,7 @@ class RingGauge(QWidget):
                 # 光晕层: 更宽的低透明度弧, 模拟辉光
                 glow = QColor(color)
                 glow.setAlpha(38)
-                p.setPen(QPen(glow, pen_w + 8, Qt.SolidLine, Qt.RoundCap))
+                p.setPen(QPen(glow, pen_w + max(4, round(pen_w * 0.6)), Qt.SolidLine, Qt.RoundCap))
                 p.drawArc(rect, 90 * 16, int(-360 * 16 * frac))
                 # 主弧线: 12 点方向顺时针
                 p.setPen(QPen(color, pen_w, Qt.SolidLine, Qt.RoundCap))
@@ -206,18 +218,20 @@ class RingGauge(QWidget):
             num_color = health_color(remain)
             alpha = 255
 
-        # 中心文字: 彩色百分比 + 灰色"剩余"
+        # 中心文字: 彩色百分比 + 灰色"剩余"(按环径等比缩放)
         p.setPen(QColor(num_color))
         p.setOpacity(alpha / 255.0)
-        f_big = QFont("Microsoft YaHei UI", 20)
+        f_big = QFont("Microsoft YaHei UI", max(8, round(side * 0.20)))
         f_big.setBold(True)
         p.setFont(f_big)
         text = "--%" if self.m_display is None else "%d%%" % round(self.m_display)
-        p.drawText(QRectF(0, center_y - 30, self.width(), 34), Qt.AlignCenter, text)
+        p.drawText(QRectF(0, center_y - side * 0.31, self.width(), side * 0.35),
+                   Qt.AlignCenter, text)
         p.setOpacity(1.0)
         p.setPen(QColor(COLOR_TEXT_DIM))
-        p.setFont(QFont("Microsoft YaHei UI", 8))
-        p.drawText(QRectF(0, center_y + 4, self.width(), 16), Qt.AlignCenter, "剩余")
+        p.setFont(QFont("Microsoft YaHei UI", max(6, round(side * 0.082))))
+        p.drawText(QRectF(0, center_y + side * 0.04, self.width(), side * 0.17),
+                   Qt.AlignCenter, "剩余")
 
 
 class ResizeGrip(QWidget):
@@ -293,9 +307,9 @@ class QuotaCard(QWidget):
         title_row.addWidget(self.lb_dot)
         root.addLayout(title_row)
 
-        # 圆环仪表(水平居中)
+        # 圆环仪表: 拉伸因子 1 吸收全部垂直伸缩, 实现环径实时压缩
         self.gauge = RingGauge()
-        root.addWidget(self.gauge, 0, Qt.AlignHCenter)
+        root.addWidget(self.gauge, 1)
 
         # 重置倒计时主行: 倒计时加粗主色, "后重置"淡化(绝对时间在右键菜单 tooltip)
         self.lb_reset = QLabel("等待首次查询…")
@@ -304,8 +318,7 @@ class QuotaCard(QWidget):
             "color:%s; font:8.5pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
         root.addWidget(self.lb_reset)
 
-        # 弹性空间置于倒计时与底部之间: 缩放放大时底栏贴底、内容贴顶
-        root.addStretch(1)
+        # 弹性空间已由圆环行(拉伸因子 1)吸收, 无需额外 stretch
 
         # 底部行: 极简状态 + 刷新按钮
         foot_row = QHBoxLayout()
@@ -328,10 +341,11 @@ class QuotaCard(QWidget):
         root.addLayout(foot_row)
 
         # 先创建右下角缩放手柄(下方 resize() 触发的 resizeEvent 会把它钉到右下角),
-        # 再设定默认尺寸 = 内容最小尺寸; 不固定死, 支持手柄缩放
+        # 默认尺寸即最大尺寸: 只允许缩小, 不允许放大
         self.grip = ResizeGrip(self)
-        self.setMinimumSize(DEFAULT_W, self.sizeHint().height())
-        self.resize(DEFAULT_W, self.sizeHint().height())
+        self.setMinimumSize(MIN_W, MIN_H)
+        self.setMaximumSize(self.sizeHint())
+        self.resize(self.sizeHint())
         self.grip.raise_()
 
     def _init_worker(self):
@@ -449,8 +463,9 @@ class QuotaCard(QWidget):
             return
         dw = gpos.x() - self.m_rstart_g.x()
         dh = gpos.y() - self.m_rstart_g.y()
-        w = max(self.minimumWidth(), min(MAX_W, self.m_rstart_size.width() + dw))
-        h = max(self.minimumHeight(), min(MAX_H, self.m_rstart_size.height() + dh))
+        # 只允许缩小: 上限即 maximumSize(默认尺寸)
+        w = max(self.minimumWidth(), min(self.maximumWidth(), self.m_rstart_size.width() + dw))
+        h = max(self.minimumHeight(), min(self.maximumHeight(), self.m_rstart_size.height() + dh))
         self.resize(w, h)
 
     def end_resize(self):
@@ -555,10 +570,10 @@ class QuotaCard(QWidget):
         # 置顶标记(窗口 show 之前设置, 无需重刷)
         self.m_b_topmost = bool(topmost)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, self.m_b_topmost)
-        # 尺寸(旧配置无 size 键则用默认)
+        # 尺寸(旧配置无 size 键则用默认; 超出上下限则夹取, 只允许缩小)
         if size and len(size) == 2:
-            w = max(self.minimumWidth(), min(MAX_W, int(size[0])))
-            h = max(self.minimumHeight(), min(MAX_H, int(size[1])))
+            w = max(self.minimumWidth(), min(self.maximumWidth(), int(size[0])))
+            h = max(self.minimumHeight(), min(self.maximumHeight(), int(size[1])))
             self.resize(w, h)
         if pos:
             self.move(int(pos[0]), int(pos[1]))

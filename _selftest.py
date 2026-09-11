@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # 创建时间: 2026-09-11
 # 功能: 悬浮窗无界面(offscreen)功能自测
-# 目的: 验证 查询->worker->UI刷新 链路、spinner 切换、窗口缩放与配置序列化, 不弹真实窗口
+# 目的: 验证 查询->worker->UI刷新 链路、spinner 切换、只缩不放的窗口缩放、
+#       圆环实时压缩与配置序列化, 不弹真实窗口
 
 import json
 import os
@@ -22,28 +23,34 @@ card.m_clock_timer.start()
 
 def dump():
     print("--- 状态:", card.lb_status.text(), flush=True)
-    print("--- 圆环显示值:", card.gauge.m_display, flush=True)
-    print("--- 默认尺寸: %dx%d" % (card.width(), card.height()), flush=True)
+    print("--- 默认尺寸(=最大): %dx%d | maximum: %dx%d"
+          % (card.width(), card.height(), card.maximumWidth(), card.maximumHeight()), flush=True)
     print("--- 任务栏可见(Qt.Window):", bool(card.windowFlags() & Qt.Window),
           "| 无Tool标记:", not bool(card.windowFlags() & Qt.Tool), flush=True)
 
-    # 缩放手柄跟随验证
+    # 1. 尝试放大 -> 应被钉在默认尺寸
     card.resize(300, 260)
-    gp = card.grip.geometry()
-    print("--- 手柄位置(应随右下角):", gp.x(), gp.y(),
-          "期望", 300 - 18, 260 - 18, flush=True)
+    print("--- 放大尝试后: %dx%d (应保持默认)" % (card.width(), card.height()), flush=True)
 
-    # 缩放回调验证(模拟手柄拖拽)
-    card.begin_resize(QPoint(400, 400))
-    card.update_resize(QPoint(450, 430))
-    card.end_resize()
-    print("--- 拖拽后尺寸: %dx%d (应在 min~max 内)" % (card.width(), card.height()), flush=True)
+    # 2. 缩小 -> 圆环实时压缩
+    card.resize(160, 160)
+    QApplication.processEvents()
+    gh = card.gauge.height()
+    side = card.gauge._side_for(card.gauge.width(), gh)
+    print("--- 缩小到 %dx%d | 圆环控件 %dx%d | 环径 %d (应小于98)"
+          % (card.width(), card.height(), card.gauge.width(), gh, side), flush=True)
 
-    # 配置序列化验证
+    # 3. 缩放到下限
+    card.resize(100, 100)
+    QApplication.processEvents()
+    print("--- 下限夹取: %dx%d (应不小于 %dx%d)"
+          % (card.width(), card.height(), card.minimumWidth(), card.minimumHeight()), flush=True)
+
+    # 4. 配置序列化 + 超限夹取回读
     card._save_config()
     cfg = json.load(open("config.json", encoding="utf-8"))
-    print("--- 配置键:", sorted(cfg.keys()), "| topmost:", cfg.get("topmost"), flush=True)
-    print("--- 置顶标记:", card.m_b_topmost, "| 窗口标题:", card.windowTitle(), flush=True)
+    print("--- 配置键:", sorted(cfg.keys()), "| size:", cfg.get("size"), flush=True)
+
     app.quit()
 
 

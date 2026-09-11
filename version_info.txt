@@ -2,8 +2,8 @@
 # Windows exe 版本信息资源(PyInstaller --version-file 用)
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 2, 0, 0),
-    prodvers=(1, 2, 0, 0),
+    filevers=(1, 2, 1, 0),
+    prodvers=(1, 2, 1, 0),
     mask=0x3F,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'codexUsageWatch'),
             StringStruct('FileDescription', 'Codex 用量悬浮窗 - 剩余用量与重置倒计时监视'),
-            StringStruct('FileVersion', '1.2.0.0'),
+            StringStruct('FileVersion', '1.2.1.0'),
             StringStruct('InternalName', 'CodexUsageWatch'),
             StringStruct('LegalCopyright', 'MIT License'),
             StringStruct('OriginalFilename', 'CodexUsageWatch.exe'),
             StringStruct('ProductName', 'Codex Usage Watch'),
-            StringStruct('ProductVersion', '1.2.0.0'),
+            StringStruct('ProductVersion', '1.2.1.0'),
           ],
         )
       ]

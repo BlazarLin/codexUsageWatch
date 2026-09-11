@@ -9,13 +9,14 @@
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime
 
 from PyQt5.QtCore import (
     QEasingCurve, QPoint, QRectF, QVariantAnimation, Qt, QThread, QTimer, pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMenu, QPushButton,
     QVBoxLayout, QWidget,
@@ -24,8 +25,21 @@ from PyQt5.QtWidgets import (
 from codex_rpc import extract_limits
 from quota_worker import QuotaWorker
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+def _app_dir():
+    """应用目录: PyInstaller 打包后 __file__ 在临时解包目录, 用 exe 所在目录持久化 config"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+APP_DIR = _app_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")  # 窗口位置持久化
+
+
+def _asset_path(rel):
+    """资源路径: 打包运行时在 _MEIPASS 解包目录, 源码运行时在仓库目录"""
+    base = getattr(sys, "_MEIPASS", APP_DIR)
+    return os.path.join(base, rel)
 
 AUTO_REFRESH_MS = 30 * 60 * 1000  # 自动查询周期: 30min
 CLOCK_TICK_MS = 60 * 1000         # 倒计时文本重算周期: 1min
@@ -525,6 +539,7 @@ def main():
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)  # 高DPI适配
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication([])
+    app.setWindowIcon(QIcon(_asset_path(os.path.join("assets", "icon.ico"))))
 
     card = QuotaCard()
     card.show()

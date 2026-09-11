@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# PyInstaller / 打包产物
+build/
+dist/
+installer/
+*.spec
+
 # 运行时状态(窗口位置等本地数据, 不入库)
 config.json
 

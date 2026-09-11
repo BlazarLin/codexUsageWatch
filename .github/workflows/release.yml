@@ -1,0 +1,88 @@
+# 创建时间: 2026-09-11
+# 功能: 发布流水线 - 推送 v* 标签时自动构建并发布
+# 目的: Windows Runner 上完成 PyInstaller 打包与 NSIS 安装包制作,
+#       将安装包上传到 GitHub Release 供用户下载安装。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyQt5 pyinstaller
+
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          "APP_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Generate version info
+        shell: pwsh
+        run: |
+          $v = $env:APP_VERSION
+          $vv = ($v -replace '[^0-9.]','').Split('.') | ForEach-Object { [int]$_ }
+          while ($vv.Count -lt 4) { $vv += 0 }
+          $vv = $vv -join ','
+          @(
+            '# UTF-8'
+            'VSVersionInfo('
+            '  ffi=FixedFileInfo('
+            "    filevers=($vv), prodvers=($vv),"
+            '    mask=0x3F, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0),'
+            '  ),'
+            '  kids=['
+            '    StringFileInfo(['
+            "      StringTable('040904B0', ["
+            "        StringStruct('CompanyName', 'codexUsageWatch'),"
+            "        StringStruct('FileDescription', 'Codex 用量悬浮窗 - 剩余用量与重置倒计时监视'),"
+            "        StringStruct('FileVersion', '$v.0'),"
+            "        StringStruct('InternalName', 'CodexUsageWatch'),"
+            "        StringStruct('LegalCopyright', 'MIT License'),"
+            "        StringStruct('OriginalFilename', 'CodexUsageWatch.exe'),"
+            "        StringStruct('ProductName', 'Codex Usage Watch'),"
+            "        StringStruct('ProductVersion', '$v.0'),"
+            '      ]),'
+            '    ]),'
+            "    VarFileInfo([VarStruct('Translation', [1033, 1200])]),"
+            '  ],'
+            ')'
+          ) | Out-File -FilePath version_info.txt -Encoding utf8
+
+      - name: Build exe (PyInstaller)
+        run: >
+          python -m PyInstaller --noconfirm --onefile --windowed
+          --name CodexUsageWatch
+          --icon assets/icon.ico
+          --version-file version_info.txt
+          --add-data "assets;assets"
+          main.py
+
+      - name: Build installer (NSIS)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          makensis /DAPP_VERSION=$env:APP_VERSION installer.nsi
+
+      - name: Upload installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/CodexUsageWatch-Setup-*.exe
+          generate_release_notes: true

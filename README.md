@@ -45,7 +45,17 @@
 精确回写会导致 Codex 掉登录。走 `app-server` 让 Codex CLI 自行管理 token 刷新，零风险。
 本仓库的 `codex_usage.py` 是同一链路的命令行版本，便于脚本化调用。
 
-## 📦 安装与使用
+## 📥 下载安装
+
+前往 [GitHub Releases](../../releases/latest) 下载最新安装包：
+
+| 文件 | 说明 |
+|---|---|
+| `CodexUsageWatch-Setup-vX.Y.Z.exe` | 安装包：向导式安装到本机（用户级，免管理员），可选桌面快捷方式与开机自启，自带卸载器 |
+
+> 首次运行若遇 SmartScreen 提示，点击「更多信息 → 仍要运行」即可（未签名的开源应用常见提示）。
+
+## 🔧 源码运行
 
 ### 前置条件
 
@@ -60,9 +70,24 @@ pip install PyQt5
 python main.py            # 或直接双击「启动悬浮窗.bat」(pythonw 无控制台)
 ```
 
+### 打包发布
+
+```bash
+pip install pyinstaller
+# 生成图标(可选, 仓库已含 assets/icon.ico)
+python scripts/make_icon.py
+# 构建 exe
+python -m PyInstaller --noconfirm --onefile --windowed --name CodexUsageWatch \
+  --icon assets/icon.ico --version-file version_info.txt --add-data "assets;assets" main.py
+# 构建安装包(需 NSIS 3.x)
+makensis /DAPP_VERSION=1.0.0 installer.nsi
+```
+
+推送 `v*` 标签时，[Release 工作流](.github/workflows/release.yml) 会自动完成上述构建并把安装包挂到 Release 页面。
+
 ### 开机自启
 
-将 `启动悬浮窗.bat` 的快捷方式放入 `shell:startup` 文件夹即可。
+任选其一：安装包勾选「开机自动启动」；或将 `启动悬浮窗.bat` 的快捷方式放入 `shell:startup` 文件夹。
 
 ## 🖱 交互说明
 
@@ -77,13 +102,18 @@ python main.py            # 或直接双击「启动悬浮窗.bat」(pythonw 无
 
 ```
 codexUsageWatch/
-├── main.py              # 悬浮窗 UI(圆环仪表/拖拽/右键菜单/定时器)
-├── quota_worker.py      # 后台查询 Worker(worker-object 模式)
-├── codex_rpc.py         # app-server JSON-RPC 查询封装
-├── codex_usage.py       # CLI 查询脚本(同链路, 便于脚本化调用)
-├── _selftest.py         # offscreen 回归自测(不弹窗)
-├── 启动悬浮窗.bat        # 无控制台启动脚本
-└── screenshots/         # 界面截图
+├── main.py                       # 悬浮窗 UI(圆环仪表/拖拽/右键菜单/定时器)
+├── quota_worker.py               # 后台查询 Worker(worker-object 模式)
+├── codex_rpc.py                  # app-server JSON-RPC 查询封装
+├── codex_usage.py                # CLI 查询脚本(同链路, 便于脚本化调用)
+├── _selftest.py                  # offscreen 回归自测(不弹窗)
+├── installer.nsi                 # NSIS 安装包脚本
+├── version_info.txt              # Windows exe 版本信息资源
+├── scripts/make_icon.py          # 应用图标生成脚本
+├── assets/                       # 应用图标(icon.ico / icon_256.png)
+├── .github/workflows/release.yml # 推送 v* 标签自动发布
+├── 启动悬浮窗.bat                 # 无控制台启动脚本
+└── screenshots/                  # 界面截图
 ```
 
 ## ❓ 常见问题
@@ -91,6 +121,10 @@ codexUsageWatch/
 **查询失败 / 未找到 codex.exe？**
 应用按「安装目录 → PATH」顺序探测 Codex CLI。若为自定义安装路径，请将 `codex.exe`
 所在目录加入 PATH，或修改 `codex_rpc.py` 中的 `CODEX_CANDIDATES`。
+
+**安装包被 SmartScreen 拦截？**
+安装包未做代码签名，首次运行会触发 Windows SmartScreen 提示，
+点击「更多信息 → 仍要运行」即可。
 
 **每次查询耗时多久？**
 实测约 3~5 秒（含子进程启动与 API 往返），全程在工作线程执行，UI 无感。

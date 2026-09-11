@@ -15,9 +15,9 @@ from datetime import datetime
 from PyQt5.QtCore import (
     QEasingCurve, QPoint, QRectF, QVariantAnimation, Qt, QThread, QTimer, pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen
+from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QApplication, QHBoxLayout, QLabel, QMenu, QPushButton,
     QVBoxLayout, QWidget,
 )
 
@@ -29,8 +29,6 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")  # 窗口位置持久化
 
 AUTO_REFRESH_MS = 30 * 60 * 1000  # 自动查询周期: 30min
 CLOCK_TICK_MS = 60 * 1000         # 倒计时文本重算周期: 1min
-HOVER_DELAY_MS = 450              # 悬停展开详情的防误触延迟
-ANIM_MS = 180                     # 面板展开/收起动画时长
 ROLL_MS = 500                     # 百分比数字滚动动画时长
 
 # 剩余比例配色阈值(与 CodexQuotaMonitor 习惯一致)
@@ -96,13 +94,8 @@ def fmt_reset_abs(resets_at):
     return datetime.fromtimestamp(resets_at).strftime("%m月%d日 %H:%M")
 
 
-def fmt_reset_abs_short(resets_at):
-    """短格式绝对重置时间: 09-15 09:39(详情面板用, 节省宽度)"""
-    return datetime.fromtimestamp(resets_at).strftime("%m-%d %H:%M")
-
-
 def short_model_name(name):
-    """模型名精简: 去掉 GPT- 与版本号前缀(如 5.3-), 避免详情面板行超宽"""
+    """模型名精简: 去掉 GPT- 与版本号前缀(如 5.3-), 缩短右键菜单行宽"""
     if not name:
         return name
     name = re.sub(r"^GPT-", "", name)
@@ -209,34 +202,6 @@ class RingGauge(QWidget):
         p.drawText(QRectF(0, center_y + 4, self.width(), 16), Qt.AlignCenter, "剩余")
 
 
-DETAIL_ROW_W = 200  # 详情面板行宽(卡片 224 - 左右边距 24)
-
-
-def _detail_row(name, value):
-    """详情面板行: 左侧灰色名称(超宽自动省略号, 完整名进 tooltip) + 右侧主色数值"""
-    row = QWidget()
-    row.setFixedWidth(DETAIL_ROW_W)
-    h = QHBoxLayout(row)
-    h.setContentsMargins(2, 0, 2, 0)
-    h.setSpacing(8)
-    f8 = QFont("Microsoft YaHei UI", 8)  # 字体用 QFont 直接指定, 保证 metrics 与渲染一致
-    lb_name = QLabel()
-    lb_name.setFont(f8)
-    lb_name.setStyleSheet("color:%s;" % COLOR_TEXT_DIM)
-    lb_val = QLabel(value)
-    lb_val.setFont(f8)
-    lb_val.setStyleSheet("color:%s;" % COLOR_TEXT)
-    # 名称按数值实际占用后的剩余宽度截断, 保证数值永不被裁
-    avail = DETAIL_ROW_W - 4 - h.spacing() - QFontMetrics(f8).horizontalAdvance(value)
-    elided = QFontMetrics(f8).elidedText(name, Qt.ElideRight, max(56, avail))
-    lb_name.setText(elided)
-    lb_name.setToolTip(name)
-    h.addWidget(lb_name)
-    h.addStretch()
-    h.addWidget(lb_val)
-    return row
-
-
 class QuotaCard(QWidget):
     """悬浮配额仪表卡片主窗口"""
 
@@ -248,7 +213,6 @@ class QuotaCard(QWidget):
         self.m_main_limit = None   # codex 通用配额原始数据
         self.m_extras = []         # 其余配额(如 Spark)
         self.m_last_plan = ""      # 计划类型
-        self.m_b_expanded = False  # 详情面板展开标记
         self.m_b_topmost = True    # 置顶状态
         self.m_drag_pos = QPoint()
 
@@ -289,24 +253,12 @@ class QuotaCard(QWidget):
         self.gauge = RingGauge()
         root.addWidget(self.gauge, 0, Qt.AlignHCenter)
 
-        # 重置倒计时主行: 倒计时加粗主色, "后重置"淡化(绝对时间在详情面板)
+        # 重置倒计时主行: 倒计时加粗主色, "后重置"淡化(绝对时间在右键菜单 tooltip)
         self.lb_reset = QLabel("等待首次查询…")
         self.lb_reset.setAlignment(Qt.AlignCenter)
         self.lb_reset.setStyleSheet(
             "color:%s; font:9pt 'Microsoft YaHei UI';" % COLOR_TEXT_DIM)
         root.addWidget(self.lb_reset)
-
-        # 详情面板: 默认隐藏, 悬停展开
-        self.detail = QWidget()
-        self.detail_box = QVBoxLayout(self.detail)
-        self.detail_box.setContentsMargins(0, 0, 0, 0)
-        self.detail_box.setSpacing(3)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background:rgba(255,255,255,18); border:none; max-height:1px;")
-        self.detail_box.addWidget(sep)
-        self.detail.hide()
-        root.addWidget(self.detail)
 
         # 底部行: 极简状态 + 刷新按钮
         foot_row = QHBoxLayout()
@@ -328,9 +280,8 @@ class QuotaCard(QWidget):
         foot_row.addWidget(self.btn_refresh)
         root.addLayout(foot_row)
 
-        # 记录收起态基准高度(展开动画的起点)
-        self.m_base_h = self.sizeHint().height()
-        self.setFixedHeight(self.m_base_h)
+        # 按内容固定窗口高度(宽度已在 _init_window 固定)
+        self.setFixedHeight(self.sizeHint().height())
 
     def _init_worker(self):
         # worker-object 模式: Worker 移入 QThread, UI 通过信号触发查询
@@ -348,20 +299,10 @@ class QuotaCard(QWidget):
         self.m_auto_timer.setSingleShot(True)
         self.m_auto_timer.setInterval(AUTO_REFRESH_MS)
         self.m_auto_timer.timeout.connect(self._request_query)
-        # 倒计时重算定时器: 不重新查询, 仅刷新显示
+        # 悬停展开已按需求关闭: 低频信息统一走右键菜单
         self.m_clock_timer = QTimer(self)
         self.m_clock_timer.setInterval(CLOCK_TICK_MS)
         self.m_clock_timer.timeout.connect(self._refresh_countdown_display)
-        # 悬停展开防误触延迟定时器
-        self.m_hover_timer = QTimer(self)
-        self.m_hover_timer.setSingleShot(True)
-        self.m_hover_timer.setInterval(HOVER_DELAY_MS)
-        self.m_hover_timer.timeout.connect(self._expand)
-        # 高度动画(展开/收起共用)
-        self.m_h_anim = QVariantAnimation(self)
-        self.m_h_anim.setDuration(ANIM_MS)
-        self.m_h_anim.setEasingCurve(QEasingCurve.OutCubic)
-        self.m_h_anim.valueChanged.connect(lambda v: self.setFixedHeight(int(v)))
 
     # ---------- 查询流程 ----------
 
@@ -406,7 +347,6 @@ class QuotaCard(QWidget):
 
         self.gauge.set_remain(remain)
         self._refresh_countdown_display()
-        self._rebuild_details()
 
         # 底部极简状态: 完整信息进 tooltip
         now = datetime.now()
@@ -416,9 +356,6 @@ class QuotaCard(QWidget):
         self.lb_status.setToolTip(
             "上次更新 %s\n30 分钟后自动刷新, 右键可手动刷新\n点击 ↻ 立即刷新"
             % now.strftime("%H:%M:%S"))
-
-        if self.m_b_expanded:
-            self._rebuild_details()  # 展开态下数据到来, 同步刷新面板
 
     def _show_error(self, err):
         # 错误不打断旧数据展示: 状态行红色简报, 完整信息进 tooltip
@@ -448,90 +385,7 @@ class QuotaCard(QWidget):
             % (health_color(max(0, 100 - primary.get("usedPercent", 0))), rel, COLOR_TEXT_DIM))
         self.lb_reset.setToolTip("%s 重置" % fmt_reset_abs(resets_at))
 
-    def _rebuild_details(self):
-        """重建详情面板行(先清空再添加, 避免布局无限累加)"""
-        box = self.detail_box
-        # 保留第 0 项分隔线
-        while box.count() > 1:
-            item = box.takeAt(1)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-
-        main = self.m_main_limit
-        if main is None:
-            return
-
-        # 通用配额: 剩余 + 短格式绝对重置时间
-        primary = main.get("primary") or {}
-        remain = max(0, 100 - primary.get("usedPercent", 0))
-        resets_at = primary.get("resetsAt", 0)
-        box.addWidget(_detail_row(
-            "通用配额",
-            "剩%d%% · %s" % (remain, fmt_reset_abs_short(resets_at) if resets_at else "-")))
-
-        # 附加配额(如 Spark): 逐窗口一行, 行名如「Codex-Spark 5时」
-        for lim in self.m_extras:
-            name = short_model_name(lim.get("limitName") or lim.get("limitId") or "附加配额")
-            for key in ("primary", "secondary"):
-                win = lim.get(key)
-                if not win:
-                    continue
-                w_remain = max(0, 100 - win.get("usedPercent", 0))
-                w_name = fmt_window_short(win.get("windowDurationMins", 0))
-                w_reset = win.get("resetsAt", 0)
-                box.addWidget(_detail_row(
-                    "%s %s" % (name, w_name),
-                    "%d%% · %s" % (w_remain, fmt_reset_abs_short(w_reset) if w_reset else "-")))
-
-        # 计划与积分
-        credits = main.get("credits") or {}
-        if credits.get("unlimited"):
-            credit_txt = "无限"
-        else:
-            credit_txt = credits.get("balance", "0")
-        plan_txt = self.m_last_plan or "?"
-        box.addWidget(_detail_row("计划 / 积分", "%s · %s" % (plan_txt, credit_txt)))
-
-        self.detail.adjustSize()
-
-    # ---------- 悬停展开/收起 ----------
-
-    def _expand(self):
-        if self.m_b_expanded or self.m_main_limit is None:
-            return
-        self._rebuild_details()
-        self.m_b_expanded = True
-        target = self.m_base_h + self.detail.sizeHint().height() + 8
-        self._animate_height_to(target)
-
-    def _collapse(self):
-        if not self.m_b_expanded:
-            return
-        self.m_b_expanded = False
-        self._animate_height_to(self.m_base_h)
-
-    def _animate_height_to(self, target):
-        self.m_h_anim.stop()
-        self.m_h_anim.setStartValue(float(self.height()))
-        self.m_h_anim.setEndValue(float(target))
-        self.m_h_anim.start()
-        # 收起动画结束后真正隐藏面板, 避免残留占位
-        if target <= self.m_base_h:
-            QTimer.singleShot(ANIM_MS + 20, lambda: self.detail.hide() if not self.m_b_expanded else None)
-        else:
-            self.detail.show()
-
-    # ---------- 交互: 拖拽 / 悬停 / 右键菜单 ----------
-
-    def enterEvent(self, event):
-        # 悬停防误触延迟后展开详情
-        if not self.m_b_expanded:
-            self.m_hover_timer.start()
-
-    def leaveEvent(self, event):
-        self.m_hover_timer.stop()
-        self._collapse()
+    # ---------- 交互: 拖拽 / 右键菜单 ----------
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -569,7 +423,7 @@ class QuotaCard(QWidget):
                 remain, fmt_remain_rel(resets_at - time.time()) if resets_at else "-"))
             info.setEnabled(False)
             for lim in self.m_extras:
-                name = lim.get("limitName") or lim.get("limitId") or "附加配额"
+                name = short_model_name(lim.get("limitName") or lim.get("limitId") or "附加配额")
                 pri = lim.get("primary") or {}
                 sec = lim.get("secondary") or {}
                 txt = name
@@ -659,7 +513,6 @@ class QuotaCard(QWidget):
         self._save_config()
         self.m_auto_timer.stop()
         self.m_clock_timer.stop()
-        self.m_hover_timer.stop()
         self.m_thread.quit()
         if not self.m_thread.wait(2000):
             # 查询仍在进行(约5s)时直接退出: 强制结束线程;

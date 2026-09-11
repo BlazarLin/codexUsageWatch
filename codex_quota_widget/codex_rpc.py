@@ -6,6 +6,7 @@
 #       避免手动刷新轮换式 refresh token 导致 Codex 掉登录。
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -43,6 +44,8 @@ def fetch_rate_limits():
             stderr=subprocess.DEVNULL,  # 屏蔽 config.toml 的无关告警
             text=True,
             encoding="utf-8",
+            # Windows 下 codex.exe 为控制台程序, 不加此标志会随每次查询弹出命令行窗口
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except OSError as exc:
         return None, "启动 codex 失败: %s" % exc

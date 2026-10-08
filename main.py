@@ -96,6 +96,8 @@ def fmt_remain_rel(delta_sec):
     """剩余时间相对描述: 4天16时 / 3时20分 / 42分"""
     if delta_sec <= 0:
         return "已重置"
+    if delta_sec < 60:
+        return "不足1分"
     total_min = int(delta_sec // 60)
     days, rem = divmod(total_min, 1440)
     hours, minutes = divmod(rem, 60)
@@ -104,6 +106,14 @@ def fmt_remain_rel(delta_sec):
     if hours > 0:
         return "%d时%02d分" % (hours, minutes)
     return "%d分" % minutes
+
+
+def fmt_reset_status(resets_at):
+    """区分等待重置和到期未刷新，缓存数据不能证明额度已经恢复。"""
+    if not resets_at:
+        return "无重置时间"
+    delta = resets_at - time.time()
+    return "到期待刷新" if delta <= 0 else fmt_remain_rel(delta) + "后重置"
 
 
 def fmt_reset_abs(resets_at):
@@ -120,11 +130,34 @@ def short_model_name(name):
     return name
 
 
+def display_windows(limit):
+    """按实际时长识别配额窗口，Plus 显示两档，Pro 系列只显示周额度。"""
+    windows = [limit.get(key) or {} for key in ("primary", "secondary")]
+    plan = (limit.get("planType") or "").strip().lower()
+    if plan == "plus" or plan.startswith("pro"):
+        durations = ((300, "5小时"), (10080, "一周")) if plan == "plus" else ((10080, "一周"),)
+        return [(label, next((window for window in windows
+                              if window.get("windowDurationMins") == minutes), {}))
+                for minutes, label in durations]
+    primary = windows[0]
+    minutes = primary.get("windowDurationMins")
+    return [(fmt_window_short(minutes) if minutes else "配额", primary)]
+
+
+def remaining_percent(window):
+    """缺失用量保持未知，不把空窗口误报成满额。"""
+    used = window.get("usedPercent")
+    return None if used is None else max(0, min(100, 100 - used))
+
+
 class RingGauge(QWidget):
     """圆环仪表: 环径/描边/字号随控件尺寸实时压缩, 查询中切换旋转扫描弧"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 为圆环和文字保留可读空间，布局据此限制窗口最小尺寸。
+        self.setMinimumSize(72, 80)
+        self.m_label = "剩余"    # 当前窗口说明
         self.m_display = None   # 当前显示值(动画中)
         self.m_target = None    # 动画目标值
         self.m_b_spin = False   # 查询中旋转标记
@@ -151,12 +184,17 @@ class RingGauge(QWidget):
 
     @staticmethod
     def _side_for(w, h):
-        """环径: 可用空间扣除描边余量后按比例压缩(1.12 = 1 + 描边占比, 保证不裁边)"""
-        return max(36, int((min(w, h) - 4) / 1.12))
+        """环径同时预留描边、光晕和抗锯齿边距，避免缩小时裁切。"""
+        return max(1, int((min(w, h) - 8) / 1.20))
 
     def set_remain(self, target_pct):
         """目标剩余值变化时滚动过渡; 首次从 0 滚起, 强化'数据到来'的感知"""
         self.m_target = target_pct
+        if target_pct is None:
+            self.m_anim.stop()
+            self.m_display = None
+            self.update()
+            return
         start = self.m_display if self.m_display is not None else 0.0
         self.m_anim.stop()
         self.m_anim.setStartValue(float(start))
@@ -231,7 +269,7 @@ class RingGauge(QWidget):
         p.setPen(QColor(COLOR_TEXT_DIM))
         p.setFont(QFont("Microsoft YaHei UI", max(6, round(side * 0.082))))
         p.drawText(QRectF(0, center_y + side * 0.04, self.width(), side * 0.17),
-                   Qt.AlignCenter, "剩余")
+                   Qt.AlignCenter, self.m_label)
 
 
 class ResizeGrip(QWidget):
@@ -268,6 +306,7 @@ class QuotaCard(QWidget):
         self.m_main_limit = None   # codex 通用配额原始数据
         self.m_extras = []         # 其余配额(如 Spark)
         self.m_last_plan = ""      # 计划类型
+        self.m_last_updated = None # 最近一次成功查询时间
         self.m_b_topmost = True    # 置顶状态
         self.m_drag_pos = QPoint()
         self.m_b_resizing = False  # 缩放进行中标记
@@ -401,20 +440,36 @@ class QuotaCard(QWidget):
         self.m_extras = extras
         self.m_last_plan = main.get("planType") or ""
 
-        primary = main.get("primary") or {}
-        remain = max(0, 100 - primary.get("usedPercent", 0))
+        now = datetime.now()
+        self.m_last_updated = now
+        plan = self.m_last_plan.strip().lower()
+        plan_name = {"plus": "Plus", "pro": "Pro", "prolite": "Pro Lite"}.get(plan, self.m_last_plan)
+        self.lb_title.setText("Codex · %s" % plan_name if plan_name else "Codex")
+        self.lb_title.setToolTip("套餐：%s\n圆环显示一周剩余；下方显示对应窗口重置时间" % (plan_name or "未知"))
+        windows = display_windows(main)
+        # 圆环只展示周余量，Plus 的短窗口余量放在下方文字中。
+        weekly = next((window for label, window in windows if label == "一周"), {})
+        self.gauge.m_label = "一周剩余"
+        self.gauge.set_remain(remaining_percent(weekly))
+        week_remain = remaining_percent(weekly)
+        self.gauge.setToolTip("一周剩余：%s\n数据更新于 %s，点击 ↻ 获取最新用量" % (
+            "暂无数据" if week_remain is None else "%d%%" % week_remain,
+            now.strftime("%H:%M:%S")))
+        known = [remaining_percent(window) for _, window in windows
+                 if remaining_percent(window) is not None]
+        remain = min(known) if known else None
 
         # 状态点: 触发限流→红, 否则按剩余健康度
         dot_color = COLOR_RED if main.get("rateLimitReachedType") else health_color(remain)
         self.lb_dot.setStyleSheet("color:%s; font:10pt;" % dot_color)
-        self.lb_dot.setToolTip("状态: %s(剩余 %d%%)" % (
-            "限流中" if main.get("rateLimitReachedType") else health_word(remain), remain))
-
-        self.gauge.set_remain(remain)
+        self.lb_dot.setToolTip("状态: %s\n%s" % (
+            "限流中" if main.get("rateLimitReachedType") else health_word(remain),
+            "\n".join("%s剩余 %s" % (label, "暂无数据" if remaining_percent(window) is None
+                                     else "%d%%" % remaining_percent(window))
+                      for label, window in windows)))
         self._refresh_countdown_display()
 
         # 底部极简状态: 完整信息进 tooltip
-        now = datetime.now()
         self.lb_status.setText("✓ %s" % now.strftime("%H:%M"))
         self.lb_status.setStyleSheet(
             "color:%s; font:8pt 'Microsoft YaHei UI';" % COLOR_GREEN)
@@ -424,11 +479,15 @@ class QuotaCard(QWidget):
 
     def _show_error(self, err):
         # 错误不打断旧数据展示: 状态行红色简报, 完整信息进 tooltip
-        self.lb_status.setText("⚠ 查询失败")
+        self.lb_status.setText("⚠ 数据未更新" if self.m_main_limit is not None else "⚠ 查询失败")
         self.lb_status.setStyleSheet(
             "color:%s; font:8pt 'Microsoft YaHei UI';" % COLOR_RED)
-        self.lb_status.setToolTip(err)
-        self.lb_dot.setToolTip("查询失败: %s" % err)
+        detail = "查询失败：%s\n点击 ↻ 重试" % err
+        if self.m_last_updated is not None:
+            detail += "\n当前显示 %s 的缓存数据" % self.m_last_updated.strftime("%H:%M:%S")
+        self.lb_status.setToolTip(detail)
+        self.lb_dot.setStyleSheet("color:%s; font:10pt;" % COLOR_AMBER)
+        self.lb_dot.setToolTip(detail)
 
     # ---------- 显示刷新 ----------
 
@@ -437,18 +496,36 @@ class QuotaCard(QWidget):
         main = self.m_main_limit
         if not main:
             return
-        primary = main.get("primary") or {}
-        resets_at = primary.get("resetsAt", 0)
-        if not resets_at:
-            self.lb_reset.setText("无重置时间信息")
-            return
-        rel = fmt_remain_rel(resets_at - time.time())
-        # 倒计时为主语, 绝对时间放 tooltip
-        self.lb_reset.setText(
-            "<span style='color:%s; font-weight:600;'>%s</span>"
-            "<span style='color:%s;'> 后重置</span>"
-            % (health_color(max(0, 100 - primary.get("usedPercent", 0))), rel, COLOR_TEXT_DIM))
-        self.lb_reset.setToolTip("%s 重置" % fmt_reset_abs(resets_at))
+        lines, tips = [], []
+        for label, window in display_windows(main):
+            resets_at = window.get("resetsAt")
+            remain = remaining_percent(window)
+            if remain is None:
+                lines.append("%s：暂无数据" % label)
+                continue
+            reset_text = fmt_reset_status(resets_at)
+            if label == "5小时":
+                lines.append(
+                    "<span style='color:%s;'>5小时：</span>"
+                    "<span style='color:%s; font-weight:600;'>%d%%</span>"
+                    "<span style='color:%s;'>，%s</span>"
+                    % (COLOR_TEXT_DIM, health_color(remain), remain, COLOR_TEXT_DIM, reset_text))
+            else:
+                lines.append(
+                    "<span style='color:%s;'>%s：</span>"
+                    "<span style='color:%s; font-weight:600;'>%s</span>"
+                    % (COLOR_TEXT_DIM, label, health_color(remain), reset_text))
+            tips.append("%s剩余 %d%%；%s" % (
+                label, remain, fmt_reset_abs(resets_at) + " 重置" if resets_at else "无重置时间"))
+        tips.append("当前用量来自上次查询；到达重置时间后点击 ↻ 获取最新用量")
+        self.lb_reset.setText("<br>".join(lines))
+        self.lb_reset.setToolTip("\n".join(tips))
+        # 套餐切换会改变文字行数，重新计算实际缩放下限。
+        self.layout().invalidate()
+        minimum = self.layout().minimumSize().expandedTo(QSize(MIN_W, MIN_H))
+        self.setMaximumSize(self.sizeHint().expandedTo(minimum))
+        self.setMinimumSize(minimum)
+        self.layout().activate()
 
     # ---------- 缩放(右下角手柄) ----------
 
@@ -513,12 +590,15 @@ class QuotaCard(QWidget):
         # 顶部只读配额详情区(文字进右键菜单)
         main = self.m_main_limit
         if main is not None:
-            primary = main.get("primary") or {}
-            remain = max(0, 100 - primary.get("usedPercent", 0))
-            resets_at = primary.get("resetsAt", 0)
-            info = menu.addAction("通用配额  剩%d%% · %s重置" % (
-                remain, fmt_remain_rel(resets_at - time.time()) if resets_at else "-"))
-            info.setEnabled(False)
+            for label, window in display_windows(main):
+                remain = remaining_percent(window)
+                resets_at = window.get("resetsAt")
+                txt = "通用配额 %s  %s" % (
+                    label, "暂无数据" if remain is None else "剩%d%%" % remain)
+                if resets_at:
+                    txt += " · %s" % fmt_reset_status(resets_at)
+                info = menu.addAction(txt)
+                info.setEnabled(False)
             for lim in self.m_extras:
                 name = short_model_name(lim.get("limitName") or lim.get("limitId") or "附加配额")
                 pri = lim.get("primary") or {}
